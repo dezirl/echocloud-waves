@@ -1,0 +1,47 @@
+  name: EchoWaves Analyzer
+
+  on:
+    schedule:
+      - cron: '0 3 * * *'
+    workflow_dispatch:
+
+  jobs:
+    analyze:
+      runs-on: ubuntu-latest
+      timeout-minutes: 340
+
+      steps:
+        - uses: actions/checkout@v4
+
+        - uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+
+        - name: Install dependencies
+          run: pip install essentia requests langdetect numpy
+
+        - name: Download existing DB
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            gh release download latest-waves \
+              --pattern "tracks.sqlite" \
+              --output tracks.sqlite 2>/dev/null \
+              && echo "Loaded existing DB" \
+              || echo "No existing DB, starting fresh"
+
+        - name: Run analyzer
+          env:
+            SC_CLIENT_ID:   ${{ secrets.SC_CLIENT_ID }}
+            SC_OAUTH_TOKEN: ${{ secrets.SC_OAUTH_TOKEN }}
+          run: python analyze.py
+
+        - name: Upload updated DB
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            gh release delete latest-waves --yes 2>/dev/null || true
+            gh release create latest-waves tracks.sqlite \
+              --title "EchoWaves DB ($(date +%Y-%m-%d))" \
+              --notes "Auto-updated track features" \
+              --latest
