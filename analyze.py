@@ -57,7 +57,7 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "Rich Amiri",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
