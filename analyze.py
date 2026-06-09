@@ -17,7 +17,8 @@ except ImportError:
 SC_API      = "https://api-v2.soundcloud.com"
 CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
 OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-MIN_PLAYS   = 10_000
+MIN_PLAYS    = 10_000
+MIN_PLAYS_RU = 3_000   # lower bar for Russian-language tracks
 MAX_PER_RUN = 500
 DB_PATH     = "tracks.sqlite"
 
@@ -234,18 +235,47 @@ def detect_language(title, description, tags):
     except:
         return "unknown"
 
-def fetch_charts(genre, kind="trending", region=None):
-    params = {"kind": kind, "genre": genre, "limit": 200}
+def fetch_charts(genre, kind="trending", region=None, max_pages=4):
+    params = {"kind": kind, "genre": genre, "limit": 100}
     if region:
         params["region"] = region
-    result = sc_get("/charts", params)
+
+    tracks = []
+    url = "/charts"
+    cur_params = params
+
+    for page in range(max_pages):
+        result = sc_get(url, cur_params)
+        if not result:
+            break
+        for item in result.get("collection", []):
+            track = item.get("track", item)
+            if track.get("playback_count", 0) >= MIN_PLAYS:
+                tracks.append(track)
+        next_href = result.get("next_href")
+        if not next_href:
+            break
+        # next_href already contains all query params — just add client_id
+        url = next_href
+        cur_params = {}
+        if page < max_pages - 1:
+            time.sleep(0.4)
+    return tracks
+
+
+def search_tracks(query, genre_tag=None, limit=100, min_plays=None):
+    """Extra source: keyword/genre search to discover tracks beyond charts."""
+    params = {"q": query, "limit": limit, "filter.duration": "medium"}
+    if genre_tag:
+        params["genres"] = genre_tag
+    result = sc_get("/search/tracks", params)
     if not result:
         return []
+    threshold = min_plays if min_plays is not None else MIN_PLAYS
     tracks = []
-    for item in result.get("collection", []):
-        track = item.get("track", item)
-        if track.get("playback_count", 0) >= MIN_PLAYS:
-            tracks.append(track)
+    for t in result.get("collection", []):
+        if t.get("playback_count", 0) >= threshold and t.get("streamable"):
+            tracks.append(t)
     return tracks
 
 def main():
@@ -285,13 +315,21 @@ def main():
                 candidates[sc_id] = t
         time.sleep(0.5)
 
-    # Russian region genre-specific charts
+    # Russian region genre-specific charts — expanded
     RU_GENRES = [
         "soundcloud:genres:hiphoprap",
         "soundcloud:genres:pop",
         "soundcloud:genres:electronic",
         "soundcloud:genres:rbsoul",
         "soundcloud:genres:danceedm",
+        "soundcloud:genres:house",
+        "soundcloud:genres:techno",
+        "soundcloud:genres:trap",
+        "soundcloud:genres:deephouse",
+        "soundcloud:genres:indie",
+        "soundcloud:genres:alternativerock",
+        "soundcloud:genres:ambient",
+        "soundcloud:genres:triphop",
     ]
     for genre in RU_GENRES:
         print(f"Fetching RU {genre}...")
@@ -323,6 +361,70 @@ def main():
             print(f"  (not available, skipped)")
         time.sleep(0.3)
 
+    # RU keyword searches — primary focus, lower play threshold
+    RU_QUERIES = [
+        ("русская музыка", None),
+        ("хип хоп бит", "hiphoprap"),
+        ("русский рэп", "hiphoprap"),
+        ("рэп 2024", "hiphoprap"),
+        ("электронная музыка", "electronic"),
+        ("русский поп", "pop"),
+        ("поп музыка", "pop"),
+        ("транс музыка", "trance"),
+        ("дип хаус", "deephouse"),
+        ("техно музыка", "techno"),
+        ("хаус музыка", "house"),
+        ("трэп бит", "trap"),
+        ("лирический рэп", "hiphoprap"),
+        ("атмосферная музыка", "ambient"),
+        ("russian lo-fi", None),
+        ("moscow hip hop", None),
+        ("russian electronic", "electronic"),
+        ("russian trap", "trap"),
+        ("русский r&b", "rbsoul"),
+        ("ритм энд блюз", "rbsoul"),
+        ("бит для трека", None),
+        ("новая музыка россия", None),
+        ("инди рок россия", "indie"),
+        ("музыка 2025", None),
+        ("топ треки россия", None),
+    ]
+    for query, tag in RU_QUERIES:
+        print(f"Searching RU: '{query}'...")
+        for t in search_tracks(query, tag, min_plays=MIN_PLAYS_RU):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+        time.sleep(0.4)
+
+    # EN keyword searches (supplementary)
+    EN_QUERIES = [
+        ("deep house mix", "deephouse"),
+        ("hip hop 2024", "hiphoprap"),
+        ("electronic music", "electronic"),
+        ("lofi chill beats", None),
+        ("trap beat", "trap"),
+        ("ambient soundscape", "ambient"),
+        ("techno set", "techno"),
+        ("drum and bass", "drumbass"),
+        ("indie rock", "indie"),
+    ]
+    for query, tag in EN_QUERIES:
+        print(f"Searching: '{query}'...")
+        for t in search_tracks(query, tag):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+        time.sleep(0.4)
+
     # Refresh play_count / likes_count for tracks already in DB
     if stat_updates:
         print(f"Refreshing stats for {len(stat_updates)} existing tracks...")
@@ -339,9 +441,15 @@ def main():
         conn.commit()
         print("Stats refreshed.")
 
-    to_analyze = sorted(candidates.values(),
-                        key=lambda t: t.get("playback_count", 0),
-                        reverse=True)[:MAX_PER_RUN]
+    def ru_priority_key(t):
+        plays = t.get("playback_count", 0)
+        tags  = (t.get("tag_list") or "").lower()
+        genre = (t.get("genre") or "").lower()
+        # boost RU tracks so they sort ahead of global tracks with similar plays
+        is_ru = any(w in tags or w in genre for w in ["россия", "russian", "рус", "ru"])
+        return (1 if is_ru else 0, plays)
+
+    to_analyze = sorted(candidates.values(), key=ru_priority_key, reverse=True)[:MAX_PER_RUN]
 
     print(f"New tracks to analyze: {len(to_analyze)}")
 
