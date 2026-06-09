@@ -19,7 +19,8 @@ CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
 OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
 MIN_PLAYS    = 5_000
 MIN_PLAYS_RU = 500     # lower bar for Russian-language tracks (pinned artists included)
-MAX_PER_RUN  = 10_000
+MAX_PER_RUN  = 1_500
+MAX_WALL_SECONDS = 4500  # 75 min hard stop so DB uploads before GitHub timeout
 DB_PATH      = "tracks.sqlite"
 
 # Pinned artists — always crawled regardless of charts position
@@ -85,6 +86,10 @@ PINNED_RU_ARTISTS = [
     "Nujabes", "J Dilla", "Madlib", "Flying Lotus", "Knxwledge",
     "Sango", "Kiefer", "Mndsgn", "Louis Cole", "Thundercat",
 ]
+
+# Fast lookup set — everything before the international section
+_ru_split = PINNED_RU_ARTISTS.index("Drake")
+PINNED_RU_SET = {n.lower() for n in PINNED_RU_ARTISTS[:_ru_split]}
 
 # Only use genre slugs that SC charts API actually accepts
 GENRES = [
@@ -233,7 +238,7 @@ def analyze_audio(audio_bytes):
             return None
         audio = audio[:44100 * 30]
 
-        bpm, _, _, _, _ = es.RhythmExtractor2013(method="multifeature")(audio)
+        bpm = float(es.PercivalBpmEstimator(sampleRate=44100)(audio))
         key, scale, _   = es.KeyExtractor()(audio)
 
         energy      = float(es.Energy()(audio))
@@ -511,18 +516,24 @@ def main():
         print("Stats refreshed.")
 
     def ru_priority_key(t):
-        plays = t.get("playback_count", 0)
-        tags  = (t.get("tag_list") or "").lower()
-        genre = (t.get("genre") or "").lower()
-        # boost RU tracks so they sort ahead of global tracks with similar plays
-        is_ru = any(w in tags or w in genre for w in ["россия", "russian", "рус", "ru"])
-        return (1 if is_ru else 0, plays)
+        plays  = (t.get("playback_count") or 0)
+        artist = (t.get("user", {}).get("username") or "").lower()
+        tags   = (t.get("tag_list") or "").lower()
+        genre  = (t.get("genre") or "").lower()
+        is_ru_artist = artist in PINNED_RU_SET or any(a in artist for a in PINNED_RU_SET)
+        is_ru_meta   = any(w in tags or w in genre for w in ["россия", "russian", "рус", "ru"])
+        score = 2 if is_ru_artist else (1 if is_ru_meta else 0)
+        return (score, plays)
 
     to_analyze = sorted(candidates.values(), key=ru_priority_key, reverse=True)[:MAX_PER_RUN]
 
     print(f"New tracks to analyze: {len(to_analyze)}")
 
+    wall_start = time.time()
     for i, track in enumerate(to_analyze):
+        if time.time() - wall_start > MAX_WALL_SECONDS:
+            print(f"  Wall-time limit reached at track {i+1}/{len(to_analyze)}, stopping.")
+            break
         sc_id  = str(track.get("id", ""))
         title  = track.get("title", "")
         artist = track.get("user", {}).get("username", "")
