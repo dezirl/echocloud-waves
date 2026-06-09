@@ -2,8 +2,12 @@ name: EchoWaves Analyzer
 
 on:
   schedule:
-    - cron: '0,30 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: analyze
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -11,7 +15,7 @@ permissions:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 60
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
