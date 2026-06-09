@@ -18,9 +18,31 @@ SC_API      = "https://api-v2.soundcloud.com"
 CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
 OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
 MIN_PLAYS    = 10_000
-MIN_PLAYS_RU = 3_000   # lower bar for Russian-language tracks
-MAX_PER_RUN = 500
-DB_PATH     = "tracks.sqlite"
+MIN_PLAYS_RU = 1_000   # lower bar for Russian-language tracks (pinned artists included)
+MAX_PER_RUN  = 800
+DB_PATH      = "tracks.sqlite"
+
+# Pinned Russian artists — always crawled regardless of charts position
+PINNED_RU_ARTISTS = [
+    "MACAN", "Miyagi", "Andy Panda", "Баста", "OG Buda", "Big Baby Tape",
+    "Bushido Zho", "Kizaru", "Friendly Thug 52 Ngg", "Markul", "Aarne",
+    "Toxi$", "Saluki", "MAYOT", "OBLADAET", "Yanix", "LSP", "Boulevard Depo",
+    "Платина", "Heronwater", "LOVV66", "SEEMEE", "THRILL PILL", "SODA LUV",
+    "104", "Кишлак", "WHITE GALLOWS", "ICEGERGERT", "Jakone", "A.V.G",
+    "SCIRENA", "PHARAOH", "FACE", "MORGENSHTERN", "Элджей", "Feduk",
+    "Скриптонит", "Truwer", "Niman", "Jah Khalib", "Ramil'", "Xcho",
+    "Navai", "HammAli", "MOT", "Гуф", "Slimus", "Птаха", "Кравц",
+    "Noize MC", "Oxxxymiron", "ATL", "Horus", "Заточка", "Рем Дигга",
+    "Каста", "Влади", "Шым", "Змей", "Murovei", "GONE.Fludd", "Rocket",
+    "Tveth", "JEEMBO", "Basic Boy", "LIZER", "ST", "Loc-Dog", "T-Fest",
+    "Mnogoznaal", "Pyrokinesis", "Дора", "МЭЙБИ БЭЙБИ", "CMH", "DK",
+    "Mzlff", "Паша Техник", "Слава КПСС", "Замай", "Грязный Рамирес",
+    "Velial Squad", "Хаски", "Nkeeei", "Uniqe", "ARTEM SHILOVETS",
+    "Aikko", "MATRANG", "N1NT3ND0", "Каспийский Груз", "ВесЪ", "Брутто",
+    "TEMNEE", "Lil Krystalll", "Asik", "JANAGA", "RAIKAHO", "Goro",
+    "NilettoThomas Mraz", "i61", "CAKEBOY", "Tanya Tekis", "Thomas Mraz",
+    "OFFMi", "Dopeclvb",
+]
 
 # Only use genre slugs that SC charts API actually accepts
 GENRES = [
@@ -235,11 +257,8 @@ def detect_language(title, description, tags):
     except:
         return "unknown"
 
-def fetch_charts(genre, kind="trending", region=None, max_pages=4):
+def fetch_charts(genre, kind="trending", max_pages=4):
     params = {"kind": kind, "genre": genre, "limit": 100}
-    if region:
-        params["region"] = region
-
     tracks = []
     url = "/charts"
     cur_params = params
@@ -250,12 +269,11 @@ def fetch_charts(genre, kind="trending", region=None, max_pages=4):
             break
         for item in result.get("collection", []):
             track = item.get("track", item)
-            if track.get("playback_count", 0) >= MIN_PLAYS:
+            if (track.get("playback_count") or 0) >= MIN_PLAYS:
                 tracks.append(track)
         next_href = result.get("next_href")
         if not next_href:
             break
-        # next_href already contains all query params — just add client_id
         url = next_href
         cur_params = {}
         if page < max_pages - 1:
@@ -274,9 +292,45 @@ def search_tracks(query, genre_tag=None, limit=100, min_plays=None):
     threshold = min_plays if min_plays is not None else MIN_PLAYS
     tracks = []
     for t in result.get("collection", []):
-        if t.get("playback_count", 0) >= threshold and t.get("streamable"):
+        if (t.get("playback_count") or 0) >= threshold and t.get("streamable"):
             tracks.append(t)
     return tracks
+
+def find_artist_id(name):
+    """Find SoundCloud user ID for an artist by name — takes the highest-follower match."""
+    result = sc_get("/search/users", {"q": name, "limit": 5})
+    if not result:
+        return None
+    users = result.get("collection", [])
+    if not users:
+        return None
+    # Prefer exact username/display-name match first, otherwise take most-followed
+    name_lc = name.lower()
+    for u in users:
+        uname = (u.get("username") or "").lower()
+        dname = (u.get("full_name") or "").lower()
+        if uname == name_lc or dname == name_lc:
+            return u["id"]
+    # Fallback: first result (SC already ranks by relevance)
+    return users[0]["id"]
+
+def fetch_user_tracks(user_id, limit=50):
+    """Fetch top tracks for a specific user — used to pull Russian artist catalogues."""
+    result = sc_get(f"/users/{user_id}/tracks", {"limit": limit, "linked_partitioning": 1})
+    if not result:
+        return []
+    tracks = []
+    for t in result.get("collection", []):
+        if (t.get("playback_count") or 0) >= MIN_PLAYS_RU and t.get("streamable"):
+            tracks.append(t)
+    return tracks
+
+def search_ru_artists(query, limit=10):
+    """Search for Russian artists by keyword and return their user IDs."""
+    result = sc_get("/search/users", {"q": query, "limit": limit})
+    if not result:
+        return []
+    return [u["id"] for u in result.get("collection", []) if u.get("id")]
 
 def main():
     print("EchoWaves Analyzer")
@@ -302,47 +356,6 @@ def main():
                 candidates[sc_id] = t
         time.sleep(0.5)
 
-    # Russian region charts — trending + top
-    for kind in ["trending", "top"]:
-        print(f"Fetching RU all-music ({kind})...")
-        for t in fetch_charts("soundcloud:genres:all-music", kind, region="RU"):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
-                continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-        time.sleep(0.5)
-
-    # Russian region genre-specific charts — expanded
-    RU_GENRES = [
-        "soundcloud:genres:hiphoprap",
-        "soundcloud:genres:pop",
-        "soundcloud:genres:electronic",
-        "soundcloud:genres:rbsoul",
-        "soundcloud:genres:danceedm",
-        "soundcloud:genres:house",
-        "soundcloud:genres:techno",
-        "soundcloud:genres:trap",
-        "soundcloud:genres:deephouse",
-        "soundcloud:genres:indie",
-        "soundcloud:genres:alternativerock",
-        "soundcloud:genres:ambient",
-        "soundcloud:genres:triphop",
-    ]
-    for genre in RU_GENRES:
-        print(f"Fetching RU {genre}...")
-        for t in fetch_charts(genre, region="RU"):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
-                continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-        time.sleep(0.3)
-
     # Genre-specific charts (skip on 404)
     for genre in GENRES[1:]:  # skip all-music, already fetched
         print(f"Fetching {genre}...")
@@ -360,6 +373,29 @@ def main():
         if found == 0 and not tracks:
             print(f"  (not available, skipped)")
         time.sleep(0.3)
+
+    # ── Pinned RU artists — guaranteed to be crawled ────────────────────────────
+    # De-duplicate list preserving order
+    seen_names = set()
+    unique_pinned = [n for n in PINNED_RU_ARTISTS if not (n in seen_names or seen_names.add(n))]
+    print(f"Crawling {len(unique_pinned)} pinned RU artists...")
+    for name in unique_pinned:
+        uid = find_artist_id(name)
+        if not uid:
+            print(f"  [{name}] not found")
+            continue
+        tracks_found = 0
+        for t in fetch_user_tracks(uid, limit=50):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+                tracks_found += 1
+        print(f"  [{name}] → {tracks_found} new tracks")
+        time.sleep(0.4)
 
     # RU keyword searches — primary focus, lower play threshold
     RU_QUERIES = [
