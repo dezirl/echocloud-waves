@@ -22,8 +22,9 @@ MIN_PLAYS_RU = 1_000   # lower bar for Russian-language tracks (pinned artists i
 MAX_PER_RUN  = 800
 DB_PATH      = "tracks.sqlite"
 
-# Pinned Russian artists — always crawled regardless of charts position
+# Pinned artists — always crawled regardless of charts position
 PINNED_RU_ARTISTS = [
+    # ── Russian / CIS ──────────────────────────────────────────────────────────
     "MACAN", "Miyagi", "Andy Panda", "Баста", "OG Buda", "Big Baby Tape",
     "Bushido Zho", "Kizaru", "Friendly Thug 52 Ngg", "Markul", "Aarne",
     "Toxi$", "Saluki", "MAYOT", "OBLADAET", "Yanix", "LSP", "Boulevard Depo",
@@ -40,8 +41,48 @@ PINNED_RU_ARTISTS = [
     "Velial Squad", "Хаски", "Nkeeei", "Uniqe", "ARTEM SHILOVETS",
     "Aikko", "MATRANG", "N1NT3ND0", "Каспийский Груз", "ВесЪ", "Брутто",
     "TEMNEE", "Lil Krystalll", "Asik", "JANAGA", "RAIKAHO", "Goro",
-    "NilettoThomas Mraz", "i61", "CAKEBOY", "Tanya Tekis", "Thomas Mraz",
-    "OFFMi", "Dopeclvb",
+    "i61", "CAKEBOY", "Tanya Tekis", "Thomas Mraz", "OFFMi", "Dopeclvb",
+    "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
+    "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
+    "Клава Кока", "Егор Крид",
+
+    # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
+    "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
+    "Lil Baby", "Lil Uzi Vert", "Playboi Carti", "21 Savage", "Gunna",
+    "Young Thug", "Roddy Ricch", "A$AP Rocky", "Tyler, the Creator",
+    "Metro Boomin", "Don Toliver", "NBA YoungBoy", "Polo G", "Lil Durk",
+    "Jack Harlow", "Cardi B", "Nicki Minaj", "Megan Thee Stallion",
+    "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
+    "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
+    "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
+
+    # ── Pop / R&B ──────────────────────────────────────────────────────────────
+    "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
+    "Harry Styles", "Olivia Rodrigo", "Doja Cat", "SZA", "H.E.R.",
+    "Summer Walker", "Jhené Aiko", "Daniel Caesar", "Frank Ocean",
+    "Bruno Mars", "Charlie Puth", "Ed Sheeran", "Sam Smith",
+    "Shawn Mendes", "Justin Bieber", "Selena Gomez", "Taylor Swift",
+    "Beyoncé", "Rihanna", "Lady Gaga", "Adele", "Lizzo",
+
+    # ── Electronic / Dance ─────────────────────────────────────────────────────
+    "Calvin Harris", "Marshmello", "Illenium", "Kygo", "Odesza",
+    "Flume", "Kaytranada", "Disclosure", "Four Tet", "Jamie xx",
+    "Fred Again..", "Skrillex", "Diplo", "Zedd", "Martin Garrix",
+    "Deadmau5", "Eric Prydz", "Solomun", "Fisher", "Chris Lake",
+    "John Summit", "Dom Dolla", "Lane 8", "Petit Biscuit", "Monolink",
+    "Bicep", "Bonobo", "Nicolas Jaar", "Caribou", "Jon Hopkins",
+
+    # ── Alternative / Indie / Rock ─────────────────────────────────────────────
+    "Arctic Monkeys", "Radiohead", "The 1975", "Tame Impala",
+    "Clairo", "Rex Orange County", "Phoebe Bridgers", "Hozier",
+    "Glass Animals", "Alt-J", "Vampire Weekend", "Foster the People",
+    "Lana Del Rey", "Halsey", "Paramore", "Twenty One Pilots",
+    "Imagine Dragons", "Coldplay", "Linkin Park", "Panic! at the Disco",
+
+    # ── Lo-Fi / Chill ──────────────────────────────────────────────────────────
+    "Nujabes", "J Dilla", "Madlib", "Flying Lotus", "Knxwledge",
+    "Sango", "Kiefer", "Mndsgn", "Louis Cole", "Thundercat",
 ]
 
 # Only use genre slugs that SC charts API actually accepts
@@ -399,31 +440,22 @@ def main():
 
     # RU keyword searches — primary focus, lower play threshold
     RU_QUERIES = [
-        ("русская музыка", None),
         ("хип хоп бит", "hiphoprap"),
-        ("русский рэп", "hiphoprap"),
-        ("рэп 2024", "hiphoprap"),
-        ("электронная музыка", "electronic"),
-        ("русский поп", "pop"),
-        ("поп музыка", "pop"),
-        ("транс музыка", "trance"),
+        ("лирический рэп", "hiphoprap"),
+        ("трэп бит", "trap"),
         ("дип хаус", "deephouse"),
         ("техно музыка", "techno"),
         ("хаус музыка", "house"),
-        ("трэп бит", "trap"),
-        ("лирический рэп", "hiphoprap"),
+        ("транс музыка", "trance"),
+        ("электронная музыка", "electronic"),
         ("атмосферная музыка", "ambient"),
+        ("русский r&b", "rbsoul"),
+        ("ритм энд блюз", "rbsoul"),
+        ("инди рок россия", "indie"),
         ("russian lo-fi", None),
         ("moscow hip hop", None),
         ("russian electronic", "electronic"),
         ("russian trap", "trap"),
-        ("русский r&b", "rbsoul"),
-        ("ритм энд блюз", "rbsoul"),
-        ("бит для трека", None),
-        ("новая музыка россия", None),
-        ("инди рок россия", "indie"),
-        ("музыка 2025", None),
-        ("топ треки россия", None),
     ]
     for query, tag in RU_QUERIES:
         print(f"Searching RU: '{query}'...")
