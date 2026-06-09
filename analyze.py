@@ -234,8 +234,11 @@ def detect_language(title, description, tags):
     except:
         return "unknown"
 
-def fetch_charts(genre, kind="trending"):
-    result = sc_get("/charts", {"kind": kind, "genre": genre, "limit": 200})
+def fetch_charts(genre, kind="trending", region=None):
+    params = {"kind": kind, "genre": genre, "limit": 200}
+    if region:
+        params["region"] = region
+    result = sc_get("/charts", params)
     if not result:
         return []
     tracks = []
@@ -268,6 +271,39 @@ def main():
             else:
                 candidates[sc_id] = t
         time.sleep(0.5)
+
+    # Russian region charts — trending + top
+    for kind in ["trending", "top"]:
+        print(f"Fetching RU all-music ({kind})...")
+        for t in fetch_charts("soundcloud:genres:all-music", kind, region="RU"):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+        time.sleep(0.5)
+
+    # Russian region genre-specific charts
+    RU_GENRES = [
+        "soundcloud:genres:hiphoprap",
+        "soundcloud:genres:pop",
+        "soundcloud:genres:electronic",
+        "soundcloud:genres:rbsoul",
+        "soundcloud:genres:danceedm",
+    ]
+    for genre in RU_GENRES:
+        print(f"Fetching RU {genre}...")
+        for t in fetch_charts(genre, region="RU"):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+        time.sleep(0.3)
 
     # Genre-specific charts (skip on 404)
     for genre in GENRES[1:]:  # skip all-music, already fetched
