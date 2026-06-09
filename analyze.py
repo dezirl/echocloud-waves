@@ -21,27 +21,32 @@ MIN_PLAYS   = 10_000
 MAX_PER_RUN = 500
 DB_PATH     = "tracks.sqlite"
 
+# Only use genre slugs that SC charts API actually accepts
 GENRES = [
     "soundcloud:genres:all-music",
     "soundcloud:genres:electronic",
     "soundcloud:genres:hiphoprap",
-    "soundcloud:genres:r-b-soul",
+    "soundcloud:genres:rbsoul",
     "soundcloud:genres:pop",
-    "soundcloud:genres:alternative",
+    "soundcloud:genres:alternativerock",
     "soundcloud:genres:ambient",
     "soundcloud:genres:danceedm",
     "soundcloud:genres:deephouse",
     "soundcloud:genres:house",
-    "soundcloud:genres:techno-trance",
+    "soundcloud:genres:techno",
+    "soundcloud:genres:trance",
     "soundcloud:genres:trap",
     "soundcloud:genres:drumbass",
     "soundcloud:genres:dubstep",
     "soundcloud:genres:indie",
     "soundcloud:genres:rock",
     "soundcloud:genres:metal",
-    "soundcloud:genres:classical-orchestral",
-    "soundcloud:genres:jazz-blues",
+    "soundcloud:genres:classical",
+    "soundcloud:genres:jazzblues",
     "soundcloud:genres:reggae",
+    "soundcloud:genres:latin",
+    "soundcloud:genres:dancehall",
+    "soundcloud:genres:triphop",
 ]
 
 SESSION = requests.Session()
@@ -58,6 +63,8 @@ def sc_get(url, params=None, retries=3):
     for attempt in range(retries):
         try:
             r = SESSION.get(url, params=p, timeout=30)
+            if r.status_code == 404:
+                return None  # skip silently, genre might not exist
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", 60))
                 print(f"    Rate limited - waiting {wait}s")
@@ -227,6 +234,17 @@ def detect_language(title, description, tags):
     except:
         return "unknown"
 
+def fetch_charts(genre, kind="trending"):
+    result = sc_get("/charts", {"kind": kind, "genre": genre, "limit": 200})
+    if not result:
+        return []
+    tracks = []
+    for item in result.get("collection", []):
+        track = item.get("track", item)
+        if track.get("playback_count", 0) >= MIN_PLAYS:
+            tracks.append(track)
+    return tracks
+
 def main():
     print("EchoWaves Analyzer")
     print(f"Essentia: {'OK' if ESSENTIA_OK else 'metadata only'} | LangDetect: {'OK' if LANG_OK else 'no'}")
@@ -235,19 +253,55 @@ def main():
     existing = {r[0] for r in conn.execute("SELECT sc_id FROM tracks")}
     print(f"Existing in DB: {len(existing)}")
 
-    candidates = {}
-    for genre in GENRES:
-        print(f"Fetching {genre}...")
-        result = sc_get("/charts", {"kind": "trending", "genre": genre, "limit": 200})
-        if not result:
-            continue
-        for item in result.get("collection", []):
-            track = item.get("track", item)
-            sc_id = str(track.get("id", ""))
-            plays = track.get("playback_count", 0)
-            if sc_id and plays >= MIN_PLAYS and sc_id not in existing:
-                candidates[sc_id] = track
+    candidates = {}   # new tracks to fully analyze
+    stat_updates = {} # existing tracks seen in charts → refresh play/likes counts
+
+    # Trending + Top for all-music (guaranteed to work)
+    for kind in ["trending", "top"]:
+        print(f"Fetching all-music ({kind})...")
+        for t in fetch_charts("soundcloud:genres:all-music", kind):
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
         time.sleep(0.5)
+
+    # Genre-specific charts (skip on 404)
+    for genre in GENRES[1:]:  # skip all-music, already fetched
+        print(f"Fetching {genre}...")
+        tracks = fetch_charts(genre)
+        found = 0
+        for t in tracks:
+            sc_id = str(t.get("id", ""))
+            if not sc_id:
+                continue
+            if sc_id in existing:
+                stat_updates[sc_id] = t
+            else:
+                candidates[sc_id] = t
+                found += 1
+        if found == 0 and not tracks:
+            print(f"  (not available, skipped)")
+        time.sleep(0.3)
+
+    # Refresh play_count / likes_count for tracks already in DB
+    if stat_updates:
+        print(f"Refreshing stats for {len(stat_updates)} existing tracks...")
+        for sc_id, t in stat_updates.items():
+            conn.execute(
+                "UPDATE tracks SET play_count=?, likes_count=?, analyzed_at=? WHERE sc_id=?",
+                (
+                    t.get("playback_count", 0),
+                    t.get("likes_count") or t.get("favoritings_count") or 0,
+                    int(time.time()),
+                    sc_id,
+                )
+            )
+        conn.commit()
+        print("Stats refreshed.")
 
     to_analyze = sorted(candidates.values(),
                         key=lambda t: t.get("playback_count", 0),
@@ -295,7 +349,7 @@ def main():
                 mfcc_0, mfcc_1, mfcc_2, mfcc_3, mfcc_4, mfcc_5, mfcc_6,
                 mfcc_7, mfcc_8, mfcc_9, mfcc_10, mfcc_11, mfcc_12,
                 analyzed_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             sc_id, title, artist, artwork,
             track.get("permalink_url", ""),
