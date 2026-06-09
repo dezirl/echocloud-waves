@@ -45,6 +45,7 @@ PINNED_RU_ARTISTS = [
     "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
+    "Pittkiid", "Fendiglock",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
