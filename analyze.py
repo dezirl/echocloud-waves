@@ -17,9 +17,9 @@ except ImportError:
 SC_API      = "https://api-v2.soundcloud.com"
 CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
 OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
-MIN_PLAYS    = 10_000
-MIN_PLAYS_RU = 1_000   # lower bar for Russian-language tracks (pinned artists included)
-MAX_PER_RUN  = 800
+MIN_PLAYS    = 5_000
+MIN_PLAYS_RU = 500     # lower bar for Russian-language tracks (pinned artists included)
+MAX_PER_RUN  = 10_000
 DB_PATH      = "tracks.sqlite"
 
 # Pinned artists — always crawled regardless of charts position
@@ -298,7 +298,7 @@ def detect_language(title, description, tags):
     except:
         return "unknown"
 
-def fetch_charts(genre, kind="trending", max_pages=4):
+def fetch_charts(genre, kind="trending", max_pages=8):
     params = {"kind": kind, "genre": genre, "limit": 100}
     tracks = []
     url = "/charts"
@@ -355,7 +355,7 @@ def find_artist_id(name):
     # Fallback: first result (SC already ranks by relevance)
     return users[0]["id"]
 
-def fetch_user_tracks(user_id, limit=50):
+def fetch_user_tracks(user_id, limit=100):
     """Fetch top tracks for a specific user — used to pull Russian artist catalogues."""
     result = sc_get(f"/users/{user_id}/tracks", {"limit": limit, "linked_partitioning": 1})
     if not result:
@@ -426,7 +426,7 @@ def main():
             print(f"  [{name}] not found")
             continue
         tracks_found = 0
-        for t in fetch_user_tracks(uid, limit=50):
+        for t in fetch_user_tracks(uid, limit=100):
             sc_id = str(t.get("id", ""))
             if not sc_id:
                 continue
