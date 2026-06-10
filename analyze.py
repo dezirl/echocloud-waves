@@ -20,8 +20,16 @@ except ImportError:
     LANG_OK = False
 
 SC_API      = "https://api-v2.soundcloud.com"
-CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
-OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
+CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "").strip()
+OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "").strip()
+
+if not CLIENT_ID:
+    raise SystemExit(
+        "\n[ERROR] SC_CLIENT_ID is not set.\n"
+        "Export it before running:\n"
+        "  export SC_CLIENT_ID=your_client_id\n"
+        "  export SC_OAUTH_TOKEN=your_oauth_token  # optional but recommended\n"
+    )
 MIN_PLAYS    = 5_000
 MIN_PLAYS_RU = 500     # lower bar for Russian-language tracks (pinned artists included)
 MAX_PER_RUN  = 1_500
@@ -140,6 +148,14 @@ def sc_get(url, params=None, retries=3):
             r = SESSION.get(url, params=p, timeout=30)
             if r.status_code == 404:
                 return None  # skip silently, genre might not exist
+            if r.status_code == 401:
+                print(
+                    "    [AUTH ERROR] 401 Unauthorized — SC_CLIENT_ID is invalid or expired.\n"
+                    "    Get a fresh client_id: open soundcloud.com in browser, DevTools → Network,\n"
+                    "    find any api-v2.soundcloud.com request, copy client_id from query params.\n"
+                    "    Then: export SC_CLIENT_ID=<new_id>"
+                )
+                return None  # no point retrying
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", 60))
                 print(f"    Rate limited - waiting {wait}s")
@@ -645,3 +661,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
