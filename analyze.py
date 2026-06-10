@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-import os, time, sqlite3, tempfile, requests, numpy as np
+import os, re, time, sqlite3, tempfile, requests, numpy as np
+
+_CYRILLIC = re.compile(r'[Ѐ-ӿ]')
+
+def has_cyrillic(text: str) -> bool:
+    return bool(_CYRILLIC.search(text or ""))
 
 try:
     import essentia.standard as es
@@ -46,7 +51,7 @@ PINNED_RU_ARTISTS = [
     "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
-    "Pittkiid", "Fendiglock", "Урал Гайсин", "LILDRUGHILL",
+    "Pittkiid", "Fendiglock", "Урал Гайсин",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
@@ -57,7 +62,7 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "Rich Amiri",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
@@ -293,16 +298,56 @@ def analyze_audio(audio_bytes):
             except: pass
         return None
 
-def detect_language(title, description, tags):
+def detect_language(title, description, tags, artist=""):
+    # Pinned RU artist → always Russian
+    if artist and artist.lower() in PINNED_RU_SET:
+        return "ru"
+    # Cyrillic characters in title/tags → Russian
+    if has_cyrillic(f"{title} {tags or ''}"):
+        return "ru"
     if not LANG_OK:
         return "unknown"
     text = f"{title} {description or ''} {tags or ''}".strip()
     if len(text) < 8:
         return "unknown"
     try:
-        return detect_lang(text)
+        lang = detect_lang(text)
+        # langdetect often confuses short CIS text as 'ro', 'bg', 'mk' etc.
+        # If title has any Cyrillic treat as ru regardless
+        if lang in ("ro", "bg", "mk", "sr", "uk", "be") and has_cyrillic(title):
+            return "ru"
+        return lang
     except:
         return "unknown"
+
+
+def fix_ru_language_in_db(conn):
+    """Patch existing DB rows: force language='ru' for pinned RU artists and Cyrillic titles."""
+    print("Patching language field for RU tracks in DB...")
+    updated = 0
+
+    # Pass 1: artist name in PINNED_RU_SET (case-insensitive)
+    # SQLite LOWER() is ASCII-only so compare in Python
+    rows = conn.execute(
+        "SELECT sc_id, artist, title, tags FROM tracks WHERE language != 'ru'"
+    ).fetchall()
+
+    to_fix = []
+    for sc_id, artist, title, tags in rows:
+        if artist and artist.lower() in PINNED_RU_SET:
+            to_fix.append(sc_id)
+        elif has_cyrillic(f"{title or ''} {tags or ''}"):
+            to_fix.append(sc_id)
+
+    if to_fix:
+        conn.executemany(
+            "UPDATE tracks SET language='ru' WHERE sc_id=?",
+            [(sc_id,) for sc_id in to_fix]
+        )
+        conn.commit()
+        updated = len(to_fix)
+
+    print(f"  Fixed {updated} tracks → language='ru'")
 
 def fetch_charts(genre, kind="trending", max_pages=8):
     params = {"kind": kind, "genre": genre, "limit": 100}
@@ -384,6 +429,7 @@ def main():
     print(f"Essentia: {'OK' if ESSENTIA_OK else 'metadata only'} | LangDetect: {'OK' if LANG_OK else 'no'}")
 
     conn = init_db()
+    fix_ru_language_in_db(conn)
     existing = {r[0] for r in conn.execute("SELECT sc_id FROM tracks")}
     print(f"Existing in DB: {len(existing)}")
 
@@ -556,7 +602,7 @@ def main():
             }
 
         tags     = track.get("tag_list", "")
-        language = detect_language(title, track.get("description", ""), tags)
+        language = detect_language(title, track.get("description", ""), tags, artist)
         artwork  = (track.get("artwork_url") or
                     track.get("user", {}).get("avatar_url", "") or "")
         if artwork:
