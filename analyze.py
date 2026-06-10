@@ -20,38 +20,8 @@ except ImportError:
     LANG_OK = False
 
 SC_API      = "https://api-v2.soundcloud.com"
-OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "").strip()
-
-def fetch_client_id():
-    """Auto-extract client_id from SoundCloud's public JS bundle."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.get("https://soundcloud.com", headers=headers, timeout=15)
-        r.raise_for_status()
-        script_urls = re.findall(r'<script[^>]+src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', r.text)
-        for url in reversed(script_urls):
-            try:
-                js = requests.get(url, headers=headers, timeout=15).text
-                match = re.search(r'client_id\s*:\s*"([a-zA-Z0-9]{20,})"', js)
-                if match:
-                    cid = match.group(1)
-                    print(f"  Auto-fetched client_id: {cid[:8]}...")
-                    return cid
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"  [WARN] Could not auto-fetch client_id: {e}")
-    return None
-
-# Use env var if set, otherwise auto-fetch
-CLIENT_ID = os.environ.get("SC_CLIENT_ID", "").strip() or fetch_client_id()
-
-if not CLIENT_ID:
-    raise SystemExit(
-        "\n[ERROR] Could not obtain SC_CLIENT_ID automatically and none set in environment.\n"
-        "Set it manually:\n"
-        "  export SC_CLIENT_ID=your_client_id\n"
-    )
+CLIENT_ID   = os.environ.get("SC_CLIENT_ID", "")
+OAUTH_TOKEN = os.environ.get("SC_OAUTH_TOKEN", "")
 MIN_PLAYS    = 5_000
 MIN_PLAYS_RU = 500     # lower bar for Russian-language tracks (pinned artists included)
 MAX_PER_RUN  = 1_500
@@ -161,7 +131,6 @@ SESSION.headers.update({
 })
 
 def sc_get(url, params=None, retries=3):
-    global CLIENT_ID
     p = dict(params or {})
     p["client_id"] = CLIENT_ID
     if not url.startswith("http"):
@@ -171,15 +140,6 @@ def sc_get(url, params=None, retries=3):
             r = SESSION.get(url, params=p, timeout=30)
             if r.status_code == 404:
                 return None  # skip silently, genre might not exist
-            if r.status_code == 401:
-                print("    [AUTH] 401 — client_id expired, trying to auto-refresh...")
-                new_id = fetch_client_id()
-                if new_id and new_id != CLIENT_ID:
-                    CLIENT_ID = new_id
-                    p["client_id"] = CLIENT_ID
-                    continue  # retry with fresh id
-                print("    [AUTH ERROR] Could not refresh client_id automatically.")
-                return None
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", 60))
                 print(f"    Rate limited - waiting {wait}s")
