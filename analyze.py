@@ -64,7 +64,7 @@ PINNED_RU_ARTISTS = [
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
     "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "Saikyo", 
-    "Jequya",
+    "Jequya", "Yeat",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
