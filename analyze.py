@@ -51,7 +51,8 @@ PINNED_RU_ARTISTS = [
     "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
-    "Pittkiid", "Fendiglock", "Урал Гайсин",
+    "Pittkiid", "Fendiglock", "Урал Гайсин", "Урал Гайсин", "Jony", 
+    "Gazan", "JDFLAG", "PLOHOYPAREN",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
@@ -62,7 +63,8 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "Saikyo", 
+    "Jequya",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
