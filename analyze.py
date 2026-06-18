@@ -51,8 +51,7 @@ PINNED_RU_ARTISTS = [
     "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
-    "Pittkiid", "Fendiglock", "Урал Гайсин", "Урал Гайсин", "Jony", 
-    "Gazan", "JDFLAG", "PLOHOYPAREN",
+    "Pittkiid", "Fendiglock", "Урал Гайсин", "z҉ saikyo_ᏕᏗᎥᏦᎩᎧፚ չคɭเՇค չคɭเՇค ơʑ 옷&Sᘺᗩᘜ z҉",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
@@ -63,8 +62,7 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "Saikyo", 
-    "Jequya", "Yeat",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
@@ -125,6 +123,8 @@ GENRES = [
     "soundcloud:genres:dancehall",
     "soundcloud:genres:triphop",
 ]
+
+HITMOS_BASE = "https://rus.hitmos.fm"
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -205,6 +205,55 @@ def pick_transcoding(track):
 def get_cdn_url(transcoding_url):
     r = sc_get(transcoding_url)
     return r.get("url") if r else None
+
+def hitmos_search(artist, title):
+    """Search hitmos.fm for an alternative audio URL when SC stream is unavailable."""
+    query = f"{artist} {title}".strip()
+    try:
+        r = requests.get(
+            f"{HITMOS_BASE}/search",
+            params={"q": query},
+            timeout=15,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept-Language": "ru,en;q=0.8",
+            },
+        )
+        if r.status_code != 200:
+            return None
+        html = r.text
+        matches = re.findall(r'/get/music/[^"<\s]+\.mp3', html)
+        if not matches:
+            return None
+        tokens = set(query.lower().replace("-", " ").replace("_", " ").split())
+        def score(href):
+            h = href.lower().replace("_", " ").replace("-", " ")
+            return sum(1 for tok in tokens if tok in h)
+        best = max(matches, key=score)
+        return HITMOS_BASE + best
+    except Exception:
+        return None
+
+def hitmos_download(url):
+    """Download first 500 KB from a hitmos CDN URL (follows 302 redirect)."""
+    try:
+        r = requests.get(
+            url,
+            timeout=30,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            stream=True,
+        )
+        if r.status_code == 200 and "audio" in r.headers.get("content-type", ""):
+            data = bytearray()
+            for chunk in r.iter_content(65536):
+                data.extend(chunk)
+                if len(data) >= 500_000:
+                    break
+            return bytes(data)
+        return None
+    except Exception:
+        return None
 
 def download_segment(cdn_url):
     try:
@@ -594,6 +643,14 @@ def main():
             if cdn:
                 audio = download_segment(cdn)
                 features = analyze_audio(audio)
+
+        if features is None and artist and title:
+            hm_url = hitmos_search(artist, title)
+            if hm_url:
+                print(f"  → hitmos fallback: {hm_url.split('/')[-1]}")
+                hm_audio = hitmos_download(hm_url)
+                if hm_audio:
+                    features = analyze_audio(hm_audio)
 
         if features is None:
             features = {
