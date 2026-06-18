@@ -54,7 +54,8 @@ PINNED_RU_ARTISTS = [
     "Pittkiid", "Fendiglock", "Урал Гайсин", "z҉ saikyo_ᏕᏗᎥᏦᎩᎧፚ չคɭเՇค չคɭเՇค ơʑ 옷&Sᘺᗩᘜ z҉",
     "Маленький ярче", "Молодой принц", "5mewmet", "5mewmet", "akiko!",
     "голодный", "elox1m", "голодный", "FORTUNA 812", "Yeschapskii",
-    "deathmarried", "4n Way",
+    "deathmarried", "4n Way", "benjamingotbenz", "ttosha", "соня абрикосова",
+    "pri3rakkr0v¡",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
@@ -65,7 +66,7 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "kuru",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
