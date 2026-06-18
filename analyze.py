@@ -52,6 +52,9 @@ PINNED_RU_ARTISTS = [
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
     "Pittkiid", "Fendiglock", "Урал Гайсин", "z҉ saikyo_ᏕᏗᎥᏦᎩᎧፚ չคɭเՇค չคɭเՇค ơʑ 옷&Sᘺᗩᘜ z҉",
+    "Маленький ярче", "Молодой принц", "5mewmet", "5mewmet", "akiko!",
+    "голодный", "elox1m", "голодный", "FORTUNA 812", "Yeschapskii",
+    "deathmarried", "4n Way",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
