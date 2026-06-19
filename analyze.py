@@ -55,7 +55,7 @@ PINNED_RU_ARTISTS = [
     "Маленький ярче", "Молодой принц", "5mewmet", "5mewmet", "akiko!",
     "голодный", "elox1m", "голодный", "FORTUNA 812", "Yeschapskii",
     "deathmarried", "4n Way", "benjamingotbenz", "ttosha", "соня абрикосова",
-    "pri3rakkr0v¡",
+    "pri3rakkr0v¡", "maybe_sonya",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
