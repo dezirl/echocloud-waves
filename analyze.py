@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, re, time, sqlite3, tempfile, requests, numpy as np
+import os, re, time, sqlite3, tempfile, unicodedata, difflib, requests, numpy as np
 
 _CYRILLIC = re.compile(r'[Ѐ-ӿ]')
 
@@ -26,7 +26,105 @@ MIN_PLAYS    = 5_000
 MIN_PLAYS_RU = 500     # lower bar for Russian-language tracks (pinned artists included)
 MAX_PER_RUN  = 1_500
 MAX_WALL_SECONDS = 4500  # 75 min hard stop so DB uploads before GitHub timeout
-DB_PATH      = "tracks.sqlite"
+
+# ── Profiles ──────────────────────────────────────────────────────────────────
+# Three databases, built by three parallel jobs of the same workflow. Which one
+# this run produces comes from WAVES_PROFILE.
+#
+# "mixed" keeps the original behaviour: charts + keyword searches + the pinned
+# list, i.e. a broad net. The other two are CURATED — they crawl nothing but the
+# artists named below, so what lands in them is decided by hand, not guessed from
+# genre tags (SoundCloud's are unreliable, and "rap" there covers everything).
+#
+# ↓ To add an artist: put their SoundCloud display name in the right list. Names
+#   go through SC search with fuzzy matching, and a weak match is skipped rather
+#   than guessed at. If the log reports SKIPPED or an empty profile, paste the
+#   full "https://soundcloud.com/<permalink>" URL instead — that path resolves
+#   directly and never guesses.
+ARTISTS_SC_RAP = [
+    # SoundCloud / underground rap
+    "королевский XVII", "юпи", "101 poza", "сумка33", "лампочка34",
+    "xylary3g", "3umph", "ak0", "allme", "angelgrind", "anonymous ember",
+    "aquakey", "Arigameh", "ARLEKIN40000", "athysue", "benjamingotbenz",
+    "bluetoothgod", "buldojke", "CLONNEX", "code10", "cowboyclicker",
+    "data404", "deathlain", "dope17", "eelijahh", "elox1m", "erdo",
+    "euro91", "evilbenz", "fakemink", "FONFORINO", "fortuna812",
+    "gitarakuru", "greyrock", "helios812", "HOODGOTH", "ivycraft",
+    "kantaa", "kudokushi", "kugakrewceo", "lovecult", "madk1d",
+    "morphineee", "nahojku", "negative_creeper", "phreshboyswag",
+    "p1gthg", "rmw", "road2god", "rspls", "silver_gloria", "suffocated",
+    "TEWIQ", "tuborosho", "vertico", "waunty", "woee33", "yung yreezy",
+    "урал гайсин", "БытьРомантикомАхуенно",
+    "Дмитрий Уткин",
+    "#снялцепи",
+    "темный принц", "первый король", "федор яйцо", "хестон", "цццц",
+    "голодный", "паранойя",
+    "0tune", "excm", "qwy1nx", "3goth2002", "fendiglock",
+    "jequya / saikto", "pittkiid", "соня абрикосова", "7ai",
+    "pri3rakkr0vj", "@продалдушу", "leilahimikat", "gothcorp", "xe1to",
+    "cardinparis", "валюта скуратов", "эра_павших", "hood goth",
+    "tenshi", "fleurnothappy", "lilsemmi (Семик)", "хулагу 3g #gcn $vsc",
+    "akiko!", "XDdata", "haru matsui", "yandme",
+]
+
+ARTISTS_RU_RAP = [
+    "OG Buda", "Big Baby Tape", "Kizaru",
+    "Aarne", "Toxi$", "Saluki", "MAYOT", "OBLADAET", "Платина",
+    "SEEMEE", "SODA LUV", "Кишлак", "ICEGERGERT", "PHARAOH", "MORGENSHTERN",
+    "Boulevard Depo", "BATO", "Kai Angel", "9mice", "ANIKV", "Heronwater",
+    "Friendly Thug 52 NGG", "163ONMYNECK", "Scally Milano", "Yanix",
+    "Bushido Zho", "Alblak 52", "MyDee52", "LOVV66",
+    "madk1d", "JDFLAG", "huzzy b",
+    "tewiq", "Темный принц",
+    "хочуспать", "Slava Marlow",
+    "Gone.Fludd",
+    "Hofmannita", "Jeembo",
+    "Lizer",
+    "Mnogoznaal", "Moneyken", "Mozee Montana", "Mr. Bruce", "Murda Killa",
+    "Murovei", "Mutabor", "N’Pans", "Natan", "Lovv66", "Matrang",
+    "T-Fest", "Xcho", "SLIMUS", "104", "Feduk", "Anikv", "Брутто",
+    "Blago White", "Cakeboy", "Coldcloud", "Code80", "DK", "Deep-Ex-Sense",
+    "DooMee", "EIGHTEEN", "ERSHOV", "FLESH", "GSPD", "HAFASA", "H1GH",
+    "IROH", "JABO", "KADI", "Kavabanga Depo Kolibri", "Krestall / Courier",
+    "LILDRUGHILL", "LIL KRYSTALLL", "LIL MORTY", "METAN", "METOX",
+    "MOZEE MONTANA", "N1NT3ND0", "OG MINAY", "ONINO", "PLOHOYPAREN",
+    "Qurt", "Rakhim", "RAM", "Raskol", "ROCKET", "RYZE", "SAINTLY",
+    "SEVEN", "SHAMI", "SOULOUD", "TEMNEE", "THRILL PILL", "TINI LIN",
+    "TUMANIYO", "TVETH", "VIA", "VERBEE", "WHITE GALLOWS", "YUNG TRAPPA",
+    "ZVEN", "ZLOY", "Baby Cute", "Baby Melo", "Cheeef",
+    "Dequine", "Elvira T", "FEDUK", "GONE.Fludd", "Hammali & Navai",
+    "JONY",
+    "ЛСП", "Эндшпиль", "Янго", "Fendiglock",
+]
+
+
+def _dedupe(names):
+    """Drop repeats (case-insensitive) — the lists are hand-maintained, and every
+    duplicate costs a search request plus a full catalogue fetch for nothing."""
+    seen, out = set(), []
+    for n in names:
+        k = n.strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(n)
+    return out
+
+
+ARTISTS_SC_RAP = _dedupe(ARTISTS_SC_RAP)
+ARTISTS_RU_RAP = _dedupe(ARTISTS_RU_RAP)
+
+PROFILES = {
+    "mixed": {"db": "tracks.sqlite",        "artists": None},
+    "screp": {"db": "tracks-screp.sqlite",  "artists": ARTISTS_SC_RAP},
+    "rurap": {"db": "tracks-rurap.sqlite",  "artists": ARTISTS_RU_RAP},
+}
+
+PROFILE = os.environ.get("WAVES_PROFILE", "mixed").strip().lower()
+if PROFILE not in PROFILES:
+    raise SystemExit(f"Unknown WAVES_PROFILE={PROFILE!r}; expected one of {sorted(PROFILES)}")
+
+CURATED_ARTISTS = PROFILES[PROFILE]["artists"]
+DB_PATH      = PROFILES[PROFILE]["db"]
 
 # Pinned artists — always crawled regardless of charts position
 PINNED_RU_ARTISTS = [
@@ -51,11 +149,7 @@ PINNED_RU_ARTISTS = [
     "FORTUNA812", "Madk1d", "Темный принц", "excm", "QWY1NX", "3goth2002",
     "снялцепи", "эрапавших", "0tune", "zer0tune", "ноль", "Тимати",
     "Клава Кока", "Егор Крид", "9mice", "VIPERR", "Kai Angel", "Zavet",
-    "Pittkiid", "Fendiglock", "Урал Гайсин", "z҉ saikyo_ᏕᏗᎥᏦᎩᎧፚ չคɭเՇค չคɭเՇค ơʑ 옷&Sᘺᗩᘜ z҉",
-    "Маленький ярче", "Молодой принц", "5mewmet", "5mewmet", "akiko!",
-    "голодный", "elox1m", "голодный", "FORTUNA 812", "Yeschapskii",
-    "deathmarried", "4n Way", "benjamingotbenz", "ttosha", "соня абрикосова",
-    "pri3rakkr0v¡", "maybe_sonya",
+    "Pittkiid", "Fendiglock", "Урал Гайсин",
 
     # ── Hip-Hop / Rap (US) ─────────────────────────────────────────────────────
     "Drake", "Kendrick Lamar", "Travis Scott", "J. Cole", "Future",
@@ -66,7 +160,7 @@ PINNED_RU_ARTISTS = [
     "City Girls", "Quavo", "Offset", "Takeoff", "Chance the Rapper",
     "Mac Miller", "Logic", "Big Sean", "Wiz Khalifa", "Kid Cudi",
     "Juice WRLD", "Lil Peep", "XXXTentacion", "Post Malone", "Witt Lowry",
-    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent", "kuru",
+    "NF", "Eminem", "Kanye West", "Jay-Z", "Nas", "50 Cent",
 
     # ── Pop / R&B ──────────────────────────────────────────────────────────────
     "The Weeknd", "Billie Eilish", "Ariana Grande", "Dua Lipa",
@@ -443,32 +537,117 @@ def search_tracks(query, genre_tag=None, limit=100, min_plays=None):
             tracks.append(t)
     return tracks
 
-def find_artist_id(name):
-    """Find SoundCloud user ID for an artist by name — takes the highest-follower match."""
-    result = sc_get("/search/users", {"q": name, "limit": 5})
-    if not result:
-        return None
-    users = result.get("collection", [])
-    if not users:
-        return None
-    # Prefer exact username/display-name match first, otherwise take most-followed
-    name_lc = name.lower()
-    for u in users:
-        uname = (u.get("username") or "").lower()
-        dname = (u.get("full_name") or "").lower()
-        if uname == name_lc or dname == name_lc:
-            return u["id"]
-    # Fallback: first result (SC already ranks by relevance)
-    return users[0]["id"]
+MATCH_THRESHOLD = 0.72   # below this a search hit is treated as "not the artist"
 
-def fetch_user_tracks(user_id, limit=100):
-    """Fetch top tracks for a specific user — used to pull Russian artist catalogues."""
+def norm_name(s):
+    """Fold a display name down to something comparable: case, accents, ё/е, and
+    the decoration people put in SoundCloud names (#tags, $, emoji, spacing)."""
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.lower().replace("ё", "е").replace("’", "'")
+    s = re.sub(r"[^0-9a-zа-я]+", "", s)
+    return s
+
+def name_variants(name):
+    """Query forms to try, most specific first. Hand-typed names carry junk the
+    search index doesn't have: a collab slash, a parenthetical, a crew tag."""
+    out = []
+    def push(v):
+        v = v.strip(" -_/|")
+        if v and v not in out:
+            out.append(v)
+    push(name)
+    push(re.sub(r"\s*\([^)]*\)", "", name))            # "lilsemmi (Семик)" -> "lilsemmi"
+    if "/" in name:                                     # "jequya / saikto" -> both halves
+        for part in name.split("/"):
+            push(part)
+    push(re.sub(r"[#$@][^\s]*", "", name))              # "хулагу 3g #gcn $vsc" -> "хулагу 3g"
+    push(re.sub(r"[#@]", "", name))                     # "#снялцепи" -> "снялцепи"
+    return out
+
+def score_user(target_norm, user):
+    """How well a search result matches what we asked for. Permalink counts too —
+    it's the stable identity, display names get renamed."""
+    best = 0.0
+    for field in (user.get("username"), user.get("permalink"), user.get("full_name")):
+        cand = norm_name(field)
+        if not cand:
+            continue
+        if cand == target_norm:
+            return 1.0
+        best = max(best, difflib.SequenceMatcher(None, target_norm, cand).ratio())
+    return best
+
+def find_artist_id(name, verbose=True):
+    """Resolve an artist entry to a SoundCloud user id.
+
+    Accepts a display name, a permalink slug, or a full profile URL. A weak match
+    is REJECTED rather than accepted: taking search's first result silently filled
+    the database with the wrong artist, which is worse than a gap you can see in
+    the log and fix in the list.
+    """
+    entry = (name or "").strip()
+    if not entry:
+        return None
+
+    # Explicit profile URL / "soundcloud.com/slug" — no guessing needed.
+    m = re.search(r"soundcloud\.com/([^/\s?#]+)", entry)
+    if m:
+        r = sc_get("/resolve", {"url": f"https://soundcloud.com/{m.group(1)}"})
+        if r and r.get("kind") == "user" and r.get("id"):
+            return r["id"]
+        if verbose:
+            print(f"  [{name}] URL did not resolve to a user")
+        return None
+
+    target = norm_name(entry)
+    best_user, best_score, seen_ids = None, 0.0, {}
+
+    for variant in name_variants(entry):
+        result = sc_get("/search/users", {"q": variant, "limit": 10})
+        for u in (result or {}).get("collection", []):
+            if not u.get("id"):
+                continue
+            s = score_user(target, u)
+            seen_ids[u["id"]] = (u, max(s, seen_ids.get(u["id"], (None, 0))[1]))
+            if s > best_score:
+                best_user, best_score = u, s
+        if best_score >= 0.999:
+            break
+        time.sleep(0.25)
+
+    if best_user and best_score >= MATCH_THRESHOLD:
+        if verbose and best_score < 0.999:
+            print(f"  [{name}] ~ matched \"{best_user.get('username')}\" "
+                  f"(/{best_user.get('permalink')}, {best_score:.2f})")
+        return best_user["id"]
+
+    if verbose:
+        if not seen_ids:
+            print(f"  [{name}] NOT FOUND — no search results. Check the spelling, "
+                  f"or put the profile URL in the list instead.")
+        else:
+            top = sorted(seen_ids.values(), key=lambda x: -x[1])[:3]
+            opts = ", ".join(f"{u.get('username')} (/{u.get('permalink')}, {s:.2f})" for u, s in top)
+            print(f"  [{name}] SKIPPED — best match too weak ({best_score:.2f}). "
+                  f"Candidates: {opts}")
+            print(f"      -> if one of these is right, replace the name in the list with "
+                  f"its soundcloud.com/<permalink> URL")
+    return None
+
+def fetch_user_tracks(user_id, limit=100, min_plays=None):
+    """Fetch top tracks for a specific user — used to pull Russian artist catalogues.
+
+    min_plays=0 takes the whole catalogue: for a hand-picked artist the play count
+    says nothing we care about, the name was already the filter.
+    """
     result = sc_get(f"/users/{user_id}/tracks", {"limit": limit, "linked_partitioning": 1})
     if not result:
         return []
+    threshold = MIN_PLAYS_RU if min_plays is None else min_plays
     tracks = []
     for t in result.get("collection", []):
-        if (t.get("playback_count") or 0) >= MIN_PLAYS_RU and t.get("streamable"):
+        if (t.get("playback_count") or 0) >= threshold and t.get("streamable"):
             tracks.append(t)
     return tracks
 
@@ -491,114 +670,168 @@ def main():
     candidates = {}   # new tracks to fully analyze
     stat_updates = {} # existing tracks seen in charts → refresh play/likes counts
 
-    # Trending + Top for all-music (guaranteed to work)
-    for kind in ["trending", "top"]:
-        print(f"Fetching all-music ({kind})...")
-        for t in fetch_charts("soundcloud:genres:all-music", kind):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
+    # Curated profile: crawl ONLY the named artists. No charts, no keyword search —
+    # the whole point of these databases is that their contents were chosen, so
+    # letting discovery bleed in would defeat it.
+    if CURATED_ARTISTS is not None:
+        print(f"Profile {PROFILE}: resolving {len(CURATED_ARTISTS)} curated artists...")
+        # Resolve every name BEFORE crawling, so the report of what failed is one
+        # block at the top of the log instead of scattered through an hour of output.
+        resolved, unresolved = [], []
+        seen_uids = {}
+        for name in CURATED_ARTISTS:
+            uid = find_artist_id(name)
+            if not uid:
+                unresolved.append(name)
                 continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-        time.sleep(0.5)
+            if uid in seen_uids:
+                # Two spellings of one profile — crawling twice would double the calls.
+                print(f"  [{name}] same profile as \"{seen_uids[uid]}\", skipping")
+                continue
+            seen_uids[uid] = name
+            resolved.append((name, uid))
+            time.sleep(0.2)
 
-    # Genre-specific charts (skip on 404)
-    for genre in GENRES[1:]:  # skip all-music, already fetched
-        print(f"Fetching {genre}...")
-        tracks = fetch_charts(genre)
-        found = 0
-        for t in tracks:
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
-                continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-                found += 1
-        if found == 0 and not tracks:
-            print(f"  (not available, skipped)")
-        time.sleep(0.3)
+        print(f"Resolved {len(resolved)}/{len(CURATED_ARTISTS)}"
+              + (f", {len(unresolved)} unresolved: {', '.join(unresolved)}" if unresolved else ""))
+        if not resolved:
+            raise SystemExit(f"Profile {PROFILE}: not a single artist resolved — "
+                             f"check SC_CLIENT_ID / SC_OAUTH_TOKEN before blaming the list.")
 
-    # ── Pinned RU artists — guaranteed to be crawled ────────────────────────────
-    # De-duplicate list preserving order
-    seen_names = set()
-    unique_pinned = [n for n in PINNED_RU_ARTISTS if not (n in seen_names or seen_names.add(n))]
-    print(f"Crawling {len(unique_pinned)} pinned RU artists...")
-    for name in unique_pinned:
-        uid = find_artist_id(name)
-        if not uid:
-            print(f"  [{name}] not found")
-            continue
-        tracks_found = 0
-        for t in fetch_user_tracks(uid, limit=100):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
-                continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-                tracks_found += 1
-        print(f"  [{name}] → {tracks_found} new tracks")
-        time.sleep(0.4)
+        print(f"Crawling {len(resolved)} artists...")
+        empty = []
+        for name, uid in resolved:
+            found = 0
+            total = 0
+            for t in fetch_user_tracks(uid, limit=200, min_plays=0):
+                total += 1
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+                    found += 1
+            if total == 0:
+                empty.append(name)
+            print(f"  [{name}] -> {found} new / {total} on profile")
+            time.sleep(0.4)
 
-    # RU keyword searches — primary focus, lower play threshold
-    RU_QUERIES = [
-        ("хип хоп бит", "hiphoprap"),
-        ("лирический рэп", "hiphoprap"),
-        ("трэп бит", "trap"),
-        ("дип хаус", "deephouse"),
-        ("техно музыка", "techno"),
-        ("хаус музыка", "house"),
-        ("транс музыка", "trance"),
-        ("электронная музыка", "electronic"),
-        ("атмосферная музыка", "ambient"),
-        ("русский r&b", "rbsoul"),
-        ("ритм энд блюз", "rbsoul"),
-        ("инди рок россия", "indie"),
-        ("russian lo-fi", None),
-        ("moscow hip hop", None),
-        ("russian electronic", "electronic"),
-        ("russian trap", "trap"),
-    ]
-    for query, tag in RU_QUERIES:
-        print(f"Searching RU: '{query}'...")
-        for t in search_tracks(query, tag, min_plays=MIN_PLAYS_RU):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
-                continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-        time.sleep(0.4)
+        # An artist that resolved but has no streamable tracks is usually a wrong
+        # match (a listener account with the same handle), so surface it too.
+        if empty:
+            print(f"WARNING: resolved but empty (likely wrong profile): {', '.join(empty)}")
 
-    # EN keyword searches (supplementary)
-    EN_QUERIES = [
-        ("deep house mix", "deephouse"),
-        ("hip hop 2024", "hiphoprap"),
-        ("electronic music", "electronic"),
-        ("lofi chill beats", None),
-        ("trap beat", "trap"),
-        ("ambient soundscape", "ambient"),
-        ("techno set", "techno"),
-        ("drum and bass", "drumbass"),
-        ("indie rock", "indie"),
-    ]
-    for query, tag in EN_QUERIES:
-        print(f"Searching: '{query}'...")
-        for t in search_tracks(query, tag):
-            sc_id = str(t.get("id", ""))
-            if not sc_id:
+    if CURATED_ARTISTS is None:
+        # Trending + Top for all-music (guaranteed to work)
+        for kind in ["trending", "top"]:
+            print(f"Fetching all-music ({kind})...")
+            for t in fetch_charts("soundcloud:genres:all-music", kind):
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+            time.sleep(0.5)
+
+        # Genre-specific charts (skip on 404)
+        for genre in GENRES[1:]:  # skip all-music, already fetched
+            print(f"Fetching {genre}...")
+            tracks = fetch_charts(genre)
+            found = 0
+            for t in tracks:
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+                    found += 1
+            if found == 0 and not tracks:
+                print(f"  (not available, skipped)")
+            time.sleep(0.3)
+
+        # ── Pinned RU artists — guaranteed to be crawled ────────────────────────────
+        # De-duplicate list preserving order
+        seen_names = set()
+        unique_pinned = [n for n in PINNED_RU_ARTISTS if not (n in seen_names or seen_names.add(n))]
+        print(f"Crawling {len(unique_pinned)} pinned RU artists...")
+        for name in unique_pinned:
+            uid = find_artist_id(name)
+            if not uid:
+                print(f"  [{name}] not found")
                 continue
-            if sc_id in existing:
-                stat_updates[sc_id] = t
-            else:
-                candidates[sc_id] = t
-        time.sleep(0.4)
+            tracks_found = 0
+            for t in fetch_user_tracks(uid, limit=100):
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+                    tracks_found += 1
+            print(f"  [{name}] → {tracks_found} new tracks")
+            time.sleep(0.4)
+
+        # RU keyword searches — primary focus, lower play threshold
+        RU_QUERIES = [
+            ("хип хоп бит", "hiphoprap"),
+            ("лирический рэп", "hiphoprap"),
+            ("трэп бит", "trap"),
+            ("дип хаус", "deephouse"),
+            ("техно музыка", "techno"),
+            ("хаус музыка", "house"),
+            ("транс музыка", "trance"),
+            ("электронная музыка", "electronic"),
+            ("атмосферная музыка", "ambient"),
+            ("русский r&b", "rbsoul"),
+            ("ритм энд блюз", "rbsoul"),
+            ("инди рок россия", "indie"),
+            ("russian lo-fi", None),
+            ("moscow hip hop", None),
+            ("russian electronic", "electronic"),
+            ("russian trap", "trap"),
+        ]
+        for query, tag in RU_QUERIES:
+            print(f"Searching RU: '{query}'...")
+            for t in search_tracks(query, tag, min_plays=MIN_PLAYS_RU):
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+            time.sleep(0.4)
+
+        # EN keyword searches (supplementary)
+        EN_QUERIES = [
+            ("deep house mix", "deephouse"),
+            ("hip hop 2024", "hiphoprap"),
+            ("electronic music", "electronic"),
+            ("lofi chill beats", None),
+            ("trap beat", "trap"),
+            ("ambient soundscape", "ambient"),
+            ("techno set", "techno"),
+            ("drum and bass", "drumbass"),
+            ("indie rock", "indie"),
+        ]
+        for query, tag in EN_QUERIES:
+            print(f"Searching: '{query}'...")
+            for t in search_tracks(query, tag):
+                sc_id = str(t.get("id", ""))
+                if not sc_id:
+                    continue
+                if sc_id in existing:
+                    stat_updates[sc_id] = t
+                else:
+                    candidates[sc_id] = t
+            time.sleep(0.4)
 
     # Refresh play_count / likes_count for tracks already in DB
     if stat_updates:
