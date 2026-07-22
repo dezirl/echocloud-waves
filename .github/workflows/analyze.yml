@@ -17,6 +17,19 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 85
+    strategy:
+      # Three databases, three parallel jobs. fail-fast is off on purpose: a
+      # mistyped artist name in one profile must not throw away the other two,
+      # which by then have spent an hour analysing audio.
+      fail-fast: false
+      matrix:
+        include:
+          - profile: mixed
+            db: tracks.sqlite
+          - profile: screp
+            db: tracks-screp.sqlite
+          - profile: rurap
+            db: tracks-rurap.sqlite
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -27,35 +40,56 @@ jobs:
         with:
           python-version: '3.11'
 
+      # The package list lives here, in the workflow. requirements.txt is only a
+      # fallback for when this install fails (a yanked version, a registry hiccup),
+      # so keep the two in sync by hand — nothing checks that they agree.
       - name: Install dependencies
-        run: pip install essentia requests langdetect numpy
+        run: |
+          pip install essentia requests langdetect numpy \
+            || pip install -r requirements.txt
 
+      # Every profile keeps its own asset on the shared release, so a run only
+      # ever reads and writes the database it owns.
       - name: Download existing DB
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download latest-waves \
-            --pattern "tracks.sqlite" \
-            --output tracks.sqlite 2>/dev/null \
-            && echo "Loaded existing DB" \
-            || echo "No existing DB, starting fresh"
+            --pattern "${{ matrix.db }}" \
+            --output "${{ matrix.db }}" 2>/dev/null \
+            && echo "Loaded existing ${{ matrix.db }}" \
+            || echo "No existing ${{ matrix.db }}, starting fresh"
 
       - name: Run analyzer
         env:
           SC_CLIENT_ID:   ${{ secrets.SC_CLIENT_ID }}
           SC_OAUTH_TOKEN: ${{ secrets.SC_OAUTH_TOKEN }}
+          WAVES_PROFILE:  ${{ matrix.profile }}
         run: python analyze.py
 
+      # Upload INTO the release instead of recreating it. The old flow deleted the
+      # release first, which with three parallel jobs would have them destroying
+      # each other's freshly uploaded databases.
       - name: Upload updated DB
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest-waves --yes 2>/dev/null || true
-          gh release create latest-waves tracks.sqlite \
-            --title "EchoWaves DB ($(date +%Y-%m-%d))" \
-            --notes "Auto-updated track features" \
-            --latest
+          gh release view latest-waves >/dev/null 2>&1 \
+            || gh release create latest-waves \
+                 --title "EchoWaves DB" \
+                 --notes "Auto-updated track features" \
+                 --latest
+          gh release upload latest-waves "${{ matrix.db }}" --clobber
 
+  # Its own job so the chain is kicked once per cycle, not once per profile.
+  retrigger:
+    needs: analyze
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
       - name: Re-trigger next run
         env:
           GH_TOKEN: ${{ github.token }}
